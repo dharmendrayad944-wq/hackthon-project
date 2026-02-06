@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Guardian - Smart Safety</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <style>
+        :root { --primary: #ff4757; --dark: #2f3542; --light: #f1f2f6; --success: #2ed573; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--light); color: var(--dark); padding-bottom: 80px; margin: 0; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .card { background: white; border-radius: 16px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+        
+        /* SOS Styling */
+        .sos-btn { width: 120px; height: 120px; border-radius: 50%; border: none; background: var(--primary); color: white; font-size: 24px; font-weight: bold; animation: pulse 2s infinite; cursor: pointer; display: block; margin: 0 auto; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.7); } 70% { box-shadow: 0 0 0 20px rgba(255, 71, 87, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 71, 87, 0); } }
+        
+        /* Map & Toggles */
+        #map { height: 300px; width: 100%; border-radius: 12px; margin-top: 10px; }
+        .btn-primary { background: var(--dark); color: white; border: none; padding: 12px; border-radius: 8px; width: 100%; font-size: 1rem; cursor: pointer; }
+        .status-indicator { text-align: center; padding: 5px; font-size: 0.8rem; border-radius: 4px; display: inline-block; margin-bottom: 10px; }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
+        
+        /* Fake Call Modal */
+        #fakeCallModal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 9999; color: white; text-align: center; padding-top: 100px; }
+        .call-actions { display: flex; justify-content: space-around; position: absolute; bottom: 50px; width: 100%; }
+        .call-btn { width: 70px; height: 70px; border-radius: 50%; font-size: 24px; border: none; cursor: pointer; }
+        /* Timer Styles */
+    .timer-urgent { color: var(--primary) !important; animation: shake 0.5s infinite; }
+    
+    /* Safe Havens List */
+    .haven-item { 
+        padding: 12px; 
+        border-bottom: 1px solid #eee; 
+        display: flex; 
+        justify-content: space-between; 
+        align-items: center;
+    }
+    .haven-item:last-child { border-bottom: none; }
+    .haven-item strong { display: block; font-size: 1rem; color: var(--dark); }
+    .haven-item small { color: #888; }
+    .call-icon { 
+        background: var(--success); color: white; 
+        padding: 8px 12px; border-radius: 20px; 
+        text-decoration: none; font-size: 0.9rem; 
+    }
+    </style>
+</head>
+<body>
+    
+<div class="container">
+    <h2 style="text-align: center;">Guardian 🛡️</h2>
+    
+    <div style="text-align: center;">
+        <span id="connectionBadge" class="status-indicator disconnected">Server Disconnected</span>
+    </div>
+
+    <div class="card" style="text-align: center;">
+        <h3 style="margin-top:0;">ONE-TAP SOS</h3>
+        <button class="sos-btn" onclick="triggerSOS('Manual Button')">SOS</button>
+        <div style="margin-top: 15px;">
+            <span id="voiceBadge" class="status-badge listening">🎤 Listening for "HELP"...</span>
+        </div>
+        <p id="recStatus" style="color: red; display: none; font-weight: bold; margin-top:10px;">🔴 Recording Evidence...</p>
+    </div>
+
+    <div class="card">
+        <h3>"Am I OK?" Timer</h3>
+        <p style="font-size: 0.9rem; color: #666;">If not stopped, SOS activates automatically.</p>
+        <div id="timerDisplay" style="font-size: 3rem; font-weight: bold; text-align: center; color: var(--success); margin: 10px 0;">00:00</div>
+        <div style="display: flex; gap: 10px;">
+            <input type="number" id="timerInput" placeholder="Min" value="10" style="width: 60px; padding: 10px; border: 1px solid #ccc; border-radius: 8px;">
+            <button class="btn-primary" onclick="startTimer()">Start Walk</button>
+            <button class="btn-primary" style="background: var(--success);" onclick="stopTimer()">I'm Safe</button>
+        </div>
+    </div>
+    <div class="card">
+        <h3>Live Behavior Tracking</h3>
+        <p>Detects falls/crashes using AI logic.</p>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span style="font-size: 0.9rem; color: #666;">Impact Force:</span>
+            <span id="forceMeter" style="font-weight: bold; font-size: 1.2rem; color: var(--primary);">0.00 G</span>
+        </div>
+        <br>
+        <button id="trackBtn" class="btn-primary" onclick="toggleTracking()">Start Protection</button>
+    </div>
+
+    <div class="card">
+        <h3>Safe Map (Jaipur)</h3>
+        <input type="text" id="havenSearch" placeholder="Search police, hospitals..." style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 8px; box-sizing: border-box;">
+        <div id="map"></div>
+    </div>
+</div>
+ <div class="card">
+        <h3>Tools</h3>
+        <button class="btn-primary" onclick="startFakeCall()">Trigger Fake Call (5s)</button>
+ </div>
+</div>
+
+<div id="fakeCallModal">
+    <div style="width: 100px; height: 100px; background: #ddd; border-radius: 50%; margin: 0 auto 20px;"></div>
+    <h1>Mom</h1>
+    <p>Incoming Call...</p>
+    <div class="call-actions">
+        <button class="call-btn" style="background: red; color: white;" onclick="endFakeCall()">✖</button>
+        <button class="call-btn" style="background: green; color: white;" onclick="endFakeCall()">📞</button>
+    </div>
+</div>
+
+
+     <div class="card">
+        <h2>Offline Safe Havens</h2>
+        <input type="text" id="havenSearch" placeholder="Search police, hospitals..." style="width: 100%; padding: 10px; margin-bottom: 10px; box-sizing: border-box; border-radius: 8px; border: 1px solid #ccc;">
+        <div id="havensList"></div>
+    </div>
+</div>
+
+<div id="fakeCallModal">
+    <div class="caller-img"></div>
+    <h1 style="color: white; font-weight: normal;">Mom</h1>
+    <p>Mobile +91 98765 43210</p>
+    <div class="call-actions">
+        <button class="call-btn decline" onclick="endFakeCall()"><i class="fas fa-phone-slash"></i> ✖</button>
+        <button class="call-btn answer" onclick="endFakeCall()"><i class="fas fa-phone"></i> 📞</button>
+    </div>
+</div>
+
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // ===========================================
+    // 1. CONFIGURATION
+    // ===========================================
+    // TODO: Paste your NGROK URL here (e.g., 'https://abc-123.ngrok-free.app')
+    const SERVER_URL = 'http://192.168.38.1:5000'; 
+    const TRUSTED_PHONE = "919876543210"; 
+
+    // ===========================================
+    // 2. SOCKET & TRACKING LOGIC
+    // ===========================================
+    let socket;
+    let isTracking = false;
+
+    try {
+        socket = io(SERVER_URL, { transports: ['websocket', 'polling'] });
+
+        socket.on('connect', () => {
+            document.getElementById('connectionBadge').innerText = "Server Protected";
+            document.getElementById('connectionBadge').className = "status-indicator connected";
+        });
+
+        socket.on('disconnect', () => {
+            document.getElementById('connectionBadge').innerText = "Server Disconnected";
+            document.getElementById('connectionBadge').className = "status-indicator disconnected";
+        });
+
+        // LISTEN FOR SERVER TRIGGER (The Backend detected a crash)
+        socket.on('trigger_sos_command', (data) => {
+            alert("⚠️ " + data.msg);
+            triggerSOS(); // Auto-fire SOS
+        });
+
+    } catch (e) { console.error("Socket Error:", e); }
+
+    function toggleTracking() {
+        if (!isTracking) {
+            // Request Permission (iOS 13+)
+            if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                DeviceMotionEvent.requestPermission()
+                    .then(res => { if (res === 'granted') startSensors(); })
+                    .catch(console.error);
+            } else {
+                startSensors(); // Android
+            }
+        } else {
+            window.removeEventListener('devicemotion', handleMotion);
+            isTracking = false;
+            document.getElementById('trackBtn').innerText = "Start Protection";
+            document.getElementById('trackBtn').style.background = "var(--dark)";
+        }
+    }
+
+    function startSensors() {
+        window.addEventListener('devicemotion', handleMotion);
+        isTracking = true;
+        document.getElementById('trackBtn').innerText = "Scanning Active...";
+        document.getElementById('trackBtn').style.background = "var(--success)";
+    }
+
+    function handleMotion(event) {
+        const x = event.accelerationIncludingGravity.x || 0;
+        const y = event.accelerationIncludingGravity.y || 0;
+        const z = event.accelerationIncludingGravity.z || 0;
+
+        // Visual Feedback
+        const total = Math.sqrt(x*x + y*y + z*z);
+        document.getElementById('forceMeter').innerText = total.toFixed(2) + " m/s²";
+
+        // Send to Backend
+        if (socket && socket.connected) {
+            socket.emit('sensor_stream', { x: x, y: y, z: z });
+        }
+    }
+
+    // ===========================================
+    // 3. SOS & UTILITIES
+    // ===========================================
+    function triggerSOS() {
+        document.getElementById('recStatus').style.display = 'block';
+        
+        // 1. Get GPS
+        if(navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(pos => {
+                const link = `http://maps.google.com/?q=${pos.coords.latitude},${pos.coords.longitude}`;
+                const msg = `EMERGENCY! Crash detected. Location: ${link}`;
+                window.open(`https://wa.me/${TRUSTED_PHONE}?text=${encodeURIComponent(msg)}`);
+            });
+        }
+        
+        // 2. Mock Recording
+        setTimeout(() => { document.getElementById('recStatus').style.display = 'none'; }, 5000);
+    }
+
+    // Fake Call Logic
+    function startFakeCall() { setTimeout(() => { document.getElementById('fakeCallModal').style.display = 'block'; navigator.vibrate([1000, 500]); }, 5000); }
+    function endFakeCall() { document.getElementById('fakeCallModal').style.display = 'none'; navigator.vibrate(0); }
+
+    // Map Logic
+    const map = L.map('map').setView([26.9124, 75.7873], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    const safeRoute = L.polyline([[26.912, 75.787], [26.915, 75.800], [26.920, 75.810]], {color: 'green', weight: 5}).addTo(map);
+    const fastRoute = L.polyline([[26.912, 75.787], [26.900, 75.790], [26.920, 75.810]], {color: 'red', weight: 5});
+    let isSafe = true;
+    function toggleRoute() {
+        if(isSafe) { map.removeLayer(safeRoute); map.addLayer(fastRoute); isSafe = false; }
+        else { map.removeLayer(fastRoute); map.addLayer(safeRoute); isSafe = true; }
+    }
+    // --- FEATURE 6: "AM I OK?" TIMER ---
+    let timerInterval;
+    
+    function startTimer() {
+        let mins = document.getElementById('timerInput').value;
+        if(!mins) return alert("Please enter minutes");
+        
+        let time = mins * 60;
+        const display = document.getElementById('timerDisplay');
+        
+        // Reset previous timers
+        clearInterval(timerInterval);
+        display.classList.remove('timer-urgent');
+        
+        timerInterval = setInterval(() => {
+            let m = Math.floor(time / 60);
+            let s = time % 60;
+            display.textContent = `${m < 10 ? '0'+m : m}:${s < 10 ? '0'+s : s}`;
+            
+            // Urgency Visuals
+            if (time < 60) display.classList.add('timer-urgent'); // Last minute red/shake
+            
+            if (time <= 0) {
+                clearInterval(timerInterval);
+                display.textContent = "SOS SENT";
+                triggerSOS(); // Auto-fire the main SOS function
+            }
+            time--;
+        }, 1000);
+    }
+
+    function stopTimer() {
+        clearInterval(timerInterval);
+        const display = document.getElementById('timerDisplay');
+        display.textContent = "SAFE";
+        display.classList.remove('timer-urgent');
+    }
+
+    // --- FEATURE 7: SAFE HAVENS (Offline Data) ---
+    const havens = [
+        {name: "Malviya Nagar Police Station", phone: "100", dist: "1.2km", type: "Police"},
+        {name: "Fortis Escorts Hospital", phone: "0141-2547000", dist: "2.5km", type: "Hospital"},
+        {name: "JLN Marg Patrol Van", phone: "112", dist: "Roaming", type: "Police"},
+        {name: "Gaurav Tower Security", phone: "N/A", dist: "0.5km", type: "Safe Zone"},
+        {name: "Jaipuria Hospital", phone: "108", dist: "3.0km", type: "Hospital"}
+    ];
+
+    function renderHavens(query = "") {
+        const list = document.getElementById('havensList');
+        list.innerHTML = "";
+        
+        const filtered = havens.filter(h => 
+            h.name.toLowerCase().includes(query.toLowerCase()) || 
+            h.type.toLowerCase().includes(query.toLowerCase())
+        );
+        
+        if(filtered.length === 0) {
+            list.innerHTML = "<p style='text-align:center; color:#999'>No places found.</p>";
+            return;
+        }
+
+        filtered.forEach(h => {
+            list.innerHTML += `
+                <div class="haven-item">
+                    <div>
+                        <strong>${h.name}</strong>
+                        <small>${h.type} • ${h.dist}</small>
+                    </div>
+                    <a href="tel:${h.phone}" class="call-icon">📞 Call</a>
+                </div>
+            `;
+        });
+    }
+
+    // Initialize list and Search Listener
+    renderHavens();
+    document.getElementById('havenSearch').addEventListener('input', (e) => renderHavens(e.target.value));
+
+    // --- EXTRA WINNING FEATURE: VOICE COMMAND (Simple Speech Recognition) ---
+    // This allows the user to scream "HELP" to trigger SOS without touching the phone
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.lang = 'en-US';
+
+        recognition.onresult = (event) => {
+            const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase();
+            console.log("Voice heard:", transcript);
+            
+            if (transcript.includes("help") || transcript.includes("save me") || transcript.includes("stop")) {
+                document.getElementById('voiceStatus').innerText = "🚨 VOICE TRIGGER DETECTED!";
+                document.getElementById('voiceStatus').style.color = "red";
+                triggerSOS();
+            }
+        };
+
+        recognition.start(); // Start listening immediately
+    } else {
+        document.getElementById('voiceStatus').innerText = "Voice control not supported in this browser.";
+    }
+    // --- 1. JAIPUR ROUTE DATA (MNIT -> WTP) ---
+// Detailed coordinates for a realistic curved path
+const routeData = {
+    // Green Path (Safe: Main JLN Marg Road - Well Lit, Patrolled)
+    safe: [
+        [26.8640, 75.8162], // MNIT Main Gate
+        [26.8635, 75.8150],
+        [26.8600, 75.8160], // JLN Marg
+        [26.8580, 75.8150],
+        [26.8552, 75.8067], // Near Gaurav Tower
+        [26.8534, 75.8051]  // WTP Entrance
+    ],
+    // Red Path (Risky: Back Alleys/Shortcuts - Dark)
+    risky: [
+        [26.8640, 75.8162], // MNIT Gate
+        [26.8610, 75.8100], // Empty Service Lane
+        [26.8590, 75.8080], // Construction Zone
+        [26.8550, 75.8060], // Unlit Park
+        [26.8534, 75.8051]  // WTP Entrance
+    ]
+};
+
+// --- 2. SAFE HAVENS (Real Places in Jaipur) ---
+// Places the user can run to for help
+const safeHavens = [
+    { name: "Malviya Nagar Police Station", lat: 26.8549, lng: 75.8243, type: "police" },
+    { name: "Fortis Escorts Hospital", lat: 26.8511, lng: 75.8044, type: "hospital" },
+    { name: "Gaurav Tower (Guarded)", lat: 26.8552, lng: 75.8067, type: "public" },
+    { name: "MNIT Security Post", lat: 26.8630, lng: 75.8160, type: "security" }
+];
+
+// --- 3. KNOWN HAZARDS (Mock Data) ---
+// Danger zones to warn the user about
+const hazards = [
+    { lat: 26.8610, lng: 75.8100, type: "No Street Lights" },
+    { lat: 26.8590, lng: 75.8080, type: "Construction Debris" }
+];
+function initMap() {
+    // 1. Center Map on MNIT Jaipur
+    map = L.map('map').setView([26.8600, 75.8100], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+    // 2. Draw Routes using Data
+    routeA = L.polyline(routeData.risky, {color: 'red', weight: 5, dashArray: '10, 10'}).addTo(map);
+    routeB = L.polyline(routeData.safe, {color: 'green', weight: 6});
+
+    // 3. Add Safe Haven Markers (Blue Shields)
+    safeHavens.forEach(haven => {
+        L.marker([haven.lat, haven.lng])
+         .addTo(map)
+         .bindPopup(`<b>🛡️ ${haven.name}</b><br>Type: ${haven.type}`);
+    });
+
+    // 4. Add Hazard Markers (Red Warning)
+    hazards.forEach(haz => {
+        L.circle([haz.lat, haz.lng], {
+            color: 'red',
+            fillColor: '#f03',
+            fillOpacity: 0.5,
+            radius: 50
+        }).addTo(map).bindPopup(`⚠️ WARNING: ${haz.type}`);
+    });
+}
+// ==================================================
+// 📁 ADDITIONAL DATA PACK (JAIPUR / MNIT AREA)
+// ==================================================
+
+// 1. EXTENDED SAFE HAVENS (For Map Markers & Search List)
+// Real locations around MNIT Jaipur & Malviya Nagar
+const fullHavenDatabase = [
+    // Police Stations
+    { name: "Malviya Nagar Police Station", type: "Police", lat: 26.8549, lng: 75.8243, phone: "0141-2550300" },
+    { name: "Gandhi Nagar Police Thana", type: "Police", lat: 26.8845, lng: 75.8005, phone: "0141-2706363" },
+    { name: "Bajaj Nagar Police Post", type: "Police", lat: 26.8700, lng: 75.7950, phone: "0141-2702222" },
+    
+    // Hospitals
+    { name: "Fortis Escorts Hospital", type: "Hospital", lat: 26.8511, lng: 75.8044, phone: "0141-2547000" },
+    { name: "Jaipuria Hospital", type: "Hospital", lat: 26.8555, lng: 75.8044, phone: "0141-2551500" },
+    { name: "Eternal Heart Care (EHCC)", type: "Hospital", lat: 26.8520, lng: 75.8080, phone: "0141-2770000" },
+    
+    // Safe Public Zones (Malls/Campuses with Guards)
+    { name: "MNIT Main Gate Security", type: "Security", lat: 26.8640, lng: 75.8162, phone: "0141-2529000" },
+    { name: "Gaurav Tower (GT) Guard Post", type: "Security", lat: 26.8552, lng: 75.8067, phone: "N/A" },
+    { name: "World Trade Park (WTP) Helpdesk", type: "Security", lat: 26.8534, lng: 75.8051, phone: "0141-2728888" },
+    { name: "Decathlon Safety Point", type: "Safe Zone", lat: 26.8400, lng: 75.8000, phone: "9876543210" },
+
+    // 24/7 Pharmacies
+    { name: "MedPlus Pharmacy (24/7)", type: "Medical", lat: 26.8500, lng: 75.8100, phone: "9988776655" },
+    { name: "Apollo Pharmacy JLN Marg", type: "Medical", lat: 26.8580, lng: 75.8120, phone: "1860-500-0101" }
+];
+
+// 2. KNOWN HAZARD ZONES (For Red Circles on Map)
+// Areas to warn users about
+const hazardZones = [
+    { lat: 26.8610, lng: 75.8100, reason: "No Street Lights" },
+    { lat: 26.8590, lng: 75.8080, reason: "Construction Debris" },
+    { lat: 26.8650, lng: 75.8200, reason: "Stray Dog Pack" },
+    { lat: 26.8500, lng: 75.8000, reason: "Water Logging" }
+];
+
+// 3. EMERGENCY HELPLINE NUMBERS (Global List)
+const emergencyContacts = [
+    { name: "Police Control Room", number: "100" },
+    { name: "Women Helpline (India)", number: "1091" },
+    { name: "Ambulance", number: "108" },
+    { name: "Fire Brigade", number: "101" },
+    { name: "Cyber Crime Helpline", number: "1930" }
+];
+// ... inside initMap() function ...
+
+    // 1. ADD ALL SAFE HAVENS (Blue Markers)
+    fullHavenDatabase.forEach(h => {
+        L.marker([h.lat, h.lng])
+         .addTo(map)
+         .bindPopup(`<b>🛡️ ${h.name}</b><br>${h.type}<br><a href='tel:${h.phone}'>Call Now</a>`);
+    });
+
+    // 2. ADD ALL HAZARD ZONES (Red Circles)
+    hazardZones.forEach(haz => {
+        L.circle([haz.lat, haz.lng], {
+            color: 'red',
+            fillColor: '#f03',
+            fillOpacity: 0.4,
+            radius: 80 // size in meters
+        }).addTo(map).bindPopup(`⚠️ <b>CAUTION</b><br>${haz.reason}`);
+    });
+    // Use the full database for the search bar
+    function renderHavens(q="") {
+        const div = document.getElementById('havensList');
+        div.innerHTML = "";
+        
+        fullHavenDatabase.filter(h => 
+            h.name.toLowerCase().includes(q.toLowerCase()) || 
+            h.type.toLowerCase().includes(q.toLowerCase())
+        ).forEach(h => {
+            div.innerHTML += `
+            <div class="haven-item">
+                <div><strong>${h.name}</strong><small>${h.type}</small></div>
+                <a href="tel:${h.phone}">📞 Call</a>
+            </div>`;
+        });
+    }
+    
+    // Initial Render
+    renderHavens();
+    // ==================================================
+    // 🌍 NEW: GPS LOCATION SENDER
+    // Sends location to server every 5 seconds to check hazards
+    // ==================================================
+    setInterval(() => {
+        if (navigator.geolocation && socket && socket.connected) {
+            navigator.geolocation.getCurrentPosition(position => {
+                // Send GPS data to the new Python function
+                socket.emit('location_update', {
+                    lat: position.coords.latitude,
+                    lng: position.coords.longitude
+                });
+            }, error => {
+                console.log("GPS Error: ", error);
+            });
+        }
+    }, 5000); // Runs every 5 seconds
+
+    // Listen for Hazard Warnings from Server
+    if(socket) {
+        socket.on('force_warning', (data) => {
+            alert("⚠️ HAZARD ALERT: " + data.msg);
+            // Optional: Speak the warning
+            let speech = new SpeechSynthesisUtterance(data.msg);
+            window.speechSynthesis.speak(speech);
+        });
+    }
+</script>
+</body>
+</html>

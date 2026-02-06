@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeRoute Tracker</title>
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 20px; background: #222; color: #fff; }
+        .status-box { font-size: 24px; margin: 20px; padding: 20px; border: 2px solid #555; }
+        .btn { padding: 15px 30px; font-size: 18px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        .sos-active { background-color: red !important; animation: blink 0.5s infinite; }
+        @keyframes blink { 50% { opacity: 0; } }
+    </style>
+</head>
+<body>
+
+    <h1>SafeRoute Monitor</h1>
+    <div id="status" class="status-box">Status: Disconnected</div>
+    <div id="data-display">Acc: 0</div>
+    <br>
+    <button class="btn" onclick="startTracking()">Start Tracking</button>
+
+    <script>
+        // 1. Connect to the Server (We will fill this URL in Step 4)
+        // IMPORTANT: Replace 'YOUR_NGROK_URL' with the actual link later
+        const socket = io('YOUR_NGROK_URL_HERE'); 
+
+        let isTracking = false;
+
+        socket.on('connect', () => {
+            document.getElementById('status').innerText = "Status: Connected to Server";
+            document.getElementById('status').style.borderColor = "green";
+        });
+
+        // 2. Listen for Server Commands (SOS Trigger)
+        socket.on('trigger_sos', (data) => {
+            document.body.classList.add('sos-active');
+            alert("⚠️ " + data.message);
+            // Here you would trigger the WhatsApp function we built earlier
+        });
+
+        function startTracking() {
+            if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                // iOS 13+ requires permission
+                DeviceMotionEvent.requestPermission()
+                    .then(response => {
+                        if (response == 'granted') {
+                            window.addEventListener('devicemotion', handleMotion);
+                        }
+                    })
+                    .catch(console.error);
+            } else {
+                // Android handles it automatically
+                window.addEventListener('devicemotion', handleMotion);
+            }
+            isTracking = true;
+            document.getElementById('status').innerText = "Status: Tracking Active...";
+        }
+
+        function handleMotion(event) {
+            if (!isTracking) return;
+
+            // 3. Read Sensor Data
+            const x = event.accelerationIncludingGravity.x || 0;
+            const y = event.accelerationIncludingGravity.y || 0;
+            const z = event.accelerationIncludingGravity.z || 0;
+
+            // Calculate rough force for display
+            const total = Math.sqrt(x*x + y*y + z*z);
+            document.getElementById('data-display').innerText = `Force: ${total.toFixed(2)}`;
+
+            // 4. Send to Server (Every 100ms ideally, but real-time here)
+            socket.emit('sensor_stream', { x: x, y: y, z: z, total: total });
+        }
+    </script>
+</body>
+</html>

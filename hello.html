@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Guardian - Integrated Safety</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.socket.io/4.0.0/socket.io.min.js"></script>
+
+    <style>
+        :root { --primary: #ff4757; --dark: #2f3542; --light: #f1f2f6; --success: #2ed573; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--light); color: var(--dark); margin: 0; padding-bottom: 80px; }
+        .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+        .card { background: white; border-radius: 16px; padding: 20px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
+
+        /* SOS Button */
+        .sos-btn { width: 140px; height: 140px; border-radius: 50%; border: none; background: var(--primary); color: white; font-size: 28px; font-weight: bold; animation: pulse 2s infinite; cursor: pointer; display: block; margin: 0 auto; box-shadow: 0 10px 20px rgba(255, 71, 87, 0.4); }
+        @keyframes pulse { 0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.7); } 70% { transform: scale(1); box-shadow: 0 0 0 20px rgba(255, 71, 87, 0); } 100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 71, 87, 0); } }
+
+        /* Timer Urgent Animation */
+        .timer-urgent { color: var(--primary) !important; animation: shake 0.5s infinite; }
+        @keyframes shake { 0% { transform: translateX(0); } 25% { transform: translateX(5px); } 50% { transform: translateX(-5px); } 100% { transform: translateX(0); } }
+
+        /* Status Badges */
+        .status-badge { padding: 6px 12px; border-radius: 20px; font-size: 0.85rem; font-weight: bold; display: inline-block; }
+        .connected { background: #d4edda; color: #155724; }
+        .disconnected { background: #f8d7da; color: #721c24; }
+        .listening { background: #e2e3e5; color: #383d41; animation: blink 1.5s infinite; }
+        @keyframes blink { 50% { opacity: 0.5; } }
+
+        .btn-primary { background: var(--dark); color: white; border: none; padding: 12px; border-radius: 8px; width: 100%; font-size: 1rem; cursor: pointer; margin-top: 10px; }
+        
+        /* Map & List */
+        #map { height: 300px; width: 100%; border-radius: 12px; margin-top: 15px; }
+        .haven-item { padding: 12px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; }
+        .haven-item a { text-decoration: none; background: var(--success); color: white; padding: 6px 12px; border-radius: 15px; font-size: 0.8rem; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div style="text-align: center; margin-bottom: 20px;">
+        <h2>Guardian 🛡️</h2>
+        <span id="serverStatus" class="status-badge disconnected">Server connected</span>
+    </div>
+
+    <div class="card" style="text-align: center;">
+        <h3 style="margin-top:0;">ONE-TAP SOS</h3>
+        <button class="sos-btn" onclick="triggerSOS('Manual Button')">SOS</button>
+        <div style="margin-top: 15px;">
+            <span id="voiceBadge" class="status-badge listening">🎤 Listening for "HELP"...</span>
+        </div>
+        <p id="recStatus" style="color: red; display: none; font-weight: bold; margin-top:10px;">🔴 Recording Evidence...</p>
+    </div>
+
+    <div class="card">
+        <h3>"Am I OK?" Timer</h3>
+        <p style="font-size: 0.9rem; color: #666;">If not stopped, SOS activates automatically.</p>
+        <div id="timerDisplay" style="font-size: 3rem; font-weight: bold; text-align: center; color: var(--success); margin: 10px 0;">00:00</div>
+        <div style="display: flex; gap: 10px;">
+            <input type="number" id="timerInput" placeholder="Min" value="10" style="width: 60px; padding: 10px; border: 1px solid #ccc; border-radius: 8px;">
+            <button class="btn-primary" onclick="startTimer()">Start Walk</button>
+            <button class="btn-primary" style="background: var(--success);" onclick="stopTimer()">I'm Safe</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h3>Crash Detection</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <span>G-Force Monitor:</span>
+            <span id="forceMeter" style="font-weight: bold; font-size: 1.2rem; color: var(--primary);">0.00 G</span>
+        </div>
+        <button id="trackBtn" class="btn-primary" onclick="toggleTracking()">Enable Crash Sensors</button>
+    </div>
+
+    <div class="card">
+        <h3>Safe Map (Jaipur)</h3>
+        <input type="text" id="havenSearch" placeholder="Search police, hospitals..." style="width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 8px; box-sizing: border-box;">
+        <div id="map"></div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // ==================================================
+    // 1. DATASETS (Jaipur)
+    // ==================================================
+    const fullHavenDatabase = [
+        { name: "Malviya Nagar Police Station", type: "Police", lat: 26.8549, lng: 75.8243, phone: "0141-2550300" },
+        { name: "Fortis Escorts Hospital", type: "Hospital", lat: 26.8511, lng: 75.8044, phone: "0141-2547000" },
+        { name: "MNIT Security Gate", type: "Security", lat: 26.8640, lng: 75.8162, phone: "0141-2529000" },
+        { name: "Gaurav Tower Guard", type: "Security", lat: 26.8552, lng: 75.8067, phone: "N/A" }
+    ];
+
+    // ==================================================
+    // 2. CONFIGURATION & STATE
+    // ==================================================
+    // TODO: PASTE YOUR IP ADDRESS HERE
+    const SOCKET_URL = 'http://192.168.1.5:5000'; 
+    const TRUSTED_PHONE = "919876543210"; 
+    
+    let socket, map, isTracking = false;
+    let timerInterval, mediaRecorder;
+
+    // ==================================================
+    // 3. SERVER CONNECTION & CRASH LISTENER
+    // ==================================================
+    try {
+        socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
+
+        socket.on('connect', () => {
+            const badge = document.getElementById('serverStatus');
+            badge.innerText = "Server Protected";
+            badge.className = "status-badge connected";
+        });
+
+        socket.on('disconnect', () => {
+            const badge = document.getElementById('serverStatus');
+            badge.innerText = "Server Disconnected";
+            badge.className = "status-badge disconnected";
+        });
+
+        // 🚨 CRITICAL: Listen for Server commanding an SOS (Crash Detected)
+        socket.on('force_sos_trigger', (data) => {
+            alert("⚠️ " + data.reason);
+            triggerSOS("Crash Detection (Auto)");
+        });
+
+    } catch (e) { console.error("Socket Error", e); }
+
+    // ==================================================
+    // 4. CENTRAL SOS FUNCTION (Connects All Features)
+    // ==================================================
+    function triggerSOS(source) {
+        // A. UI Feedback
+        document.getElementById('recStatus').style.display = 'block';
+        
+        // B. Notify Server
+        if(socket && socket.connected) {
+            socket.emit('report_sos', { source: source });
+        }
+
+        // C. Record Audio (Evidence)
+        if(navigator.mediaDevices) {
+            navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+                mediaRecorder = new MediaRecorder(stream);
+                mediaRecorder.start();
+                setTimeout(() => { mediaRecorder.stop(); document.getElementById('recStatus').style.display = 'none'; }, 10000);
+            }).catch(e => console.log("Mic error"));
+        }
+
+        // D. Send WhatsApp
+        if(navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(pos => {
+                const link = `http://googleusercontent.com/maps.google.com/?q=${pos.coords.latitude},${pos.coords.longitude}`;
+                const msg = `🚨 EMERGENCY! Triggered by: ${source}. Location: ${link}`;
+                window.open(`https://wa.me/${TRUSTED_PHONE}?text=${encodeURIComponent(msg)}`);
+            });
+        }
+    }
+
+    // ==================================================
+    // 5. FEATURE: TIMER (If no click "I am Safe")
+    // ==================================================
+    function startTimer() {
+        let time = document.getElementById('timerInput').value * 60;
+        const display = document.getElementById('timerDisplay');
+        clearInterval(timerInterval);
+        
+        timerInterval = setInterval(() => {
+            let m = Math.floor(time / 60);
+            let s = time % 60;
+            display.innerText = `${m}:${s < 10 ? '0'+s : s}`;
+            
+            // Urgent Visuals
+            if(time < 10) display.classList.add('timer-urgent');
+            
+            // 🚨 TRIGGER SOS AUTOMATICALLY
+            if(time <= 0) { 
+                clearInterval(timerInterval); 
+                display.innerText = "SOS SENT";
+                triggerSOS("Timer Expiry (Auto)"); 
+            }
+            time--;
+        }, 1000);
+    }
+
+    function stopTimer() { 
+        clearInterval(timerInterval); 
+        const display = document.getElementById('timerDisplay');
+        display.innerText = "SAFE"; 
+        display.classList.remove('timer-urgent'); 
+    }
+
+    // ==================================================
+    // 6. FEATURE: VOICE SAFETY (Web Speech API)
+    // ==================================================
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.lang = 'en-US';
+        
+        recognition.onresult = (event) => {
+            const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase();
+            // 🚨 TRIGGER SOS IF "HELP" IS HEARD
+            if (transcript.includes("help") || transcript.includes("save me")) {
+                document.getElementById('voiceBadge').innerText = "🚨 VOICE TRIGGERED!";
+                document.getElementById('voiceBadge').style.background = "red";
+                document.getElementById('voiceBadge').style.color = "white";
+                triggerSOS("Voice Command");
+            }
+        };
+        try { recognition.start(); } catch(e) {}
+    } else {
+        document.getElementById('voiceBadge').innerText = "Voice Not Supported";
+    }
+
+    // ==================================================
+    // 7. FEATURE: SENSOR TRACKING (Sends data to Server)
+    // ==================================================
+    function toggleTracking() {
+        if (!isTracking) {
+            if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                DeviceMotionEvent.requestPermission().then(r => { if (r==='granted') startSensors(); });
+            } else { startSensors(); }
+        } else {
+            window.removeEventListener('devicemotion', handleMotion);
+            isTracking = false;
+            document.getElementById('trackBtn').innerText = "Enable Crash Sensors";
+            document.getElementById('trackBtn').style.background = "var(--dark)";
+        }
+    }
+
+    function startSensors() {
+        window.addEventListener('devicemotion', handleMotion);
+        isTracking = true;
+        document.getElementById('trackBtn').innerText = "Sensors Active...";
+        document.getElementById('trackBtn').style.background = "var(--success)";
+    }
+
+    function handleMotion(event) {
+        const x = event.accelerationIncludingGravity.x || 0;
+        const y = event.accelerationIncludingGravity.y || 0;
+        const z = event.accelerationIncludingGravity.z || 0;
+        const total = Math.sqrt(x*x + y*y + z*z);
+        
+        document.getElementById('forceMeter').innerText = total.toFixed(2) + " G";
+        
+        // SEND LIVE DATA TO SERVER
+        if(socket && socket.connected) {
+            socket.emit('sensor_data', { x, y, z });
+        }
+    }
+
+    // ==================================================
+    // 8. MAP SETUP
+    // ==================================================
+    function initMap() {
+        map = L.map('map').setView([26.8600, 75.8100], 14);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        fullHavenDatabase.forEach(h => {
+            L.marker([h.lat, h.lng]).addTo(map).bindPopup(`<b>${h.name}</b><br>${h.type}`);
+        });
+    }
+    initMap();
+
+</script>
+</body>
+</html>

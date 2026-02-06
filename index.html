@@ -1,0 +1,503 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Guardian - Personal Safety</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root {
+            --primary: #ff4757; /* Urgent Red */
+            --dark: #2f3542;
+            --light: #f1f2f6;
+            --success: #2ed573;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--light);
+            color: var(--dark);
+            padding-bottom: 80px;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        h1 { text-align: center; color: var(--dark); margin-bottom: 30px; }
+        h2 { font-size: 1.2rem; margin-top: 0; }
+
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+            transition: transform 0.2s;
+        }
+
+        /* Feature 1: SOS Button */
+        .sos-container { text-align: center; }
+        .sos-btn {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            border: none;
+            background: var(--primary);
+            color: white;
+            font-weight: bold;
+            font-size: 24px;
+            box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.7);
+            animation: pulse 2s infinite;
+            cursor: pointer;
+        }
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 20px rgba(255, 71, 87, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(255, 71, 87, 0); }
+        }
+
+        /* Feature 2: Fake Call Modal */
+        #fakeCallModal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.9);
+            backdrop-filter: blur(10px);
+            z-index: 9999;
+            color: white;
+            text-align: center;
+            padding-top: 100px;
+        }
+        .caller-img {
+            width: 120px; height: 120px; background: #ddd; border-radius: 50%; margin: 0 auto 20px;
+            background-image: url('https://cdn-icons-png.flaticon.com/512/3135/3135715.png');
+            background-size: cover;
+        }
+        .call-actions {
+            position: absolute; bottom: 50px; width: 100%;
+            display: flex; justify-content: space-around;
+        }
+        .call-btn {
+            width: 70px; height: 70px; border-radius: 50%; border: none; font-size: 24px; cursor: pointer;
+        }
+        .answer { background: var(--success); color: white; }
+        .decline { background: var(--primary); color: white; }
+
+        /* Feature 4 & 5: Map */
+        #map { height: 350px; width: 100%; border-radius: 12px; margin-top: 10px; }
+        
+        .toggle-container {
+            display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;
+        }
+        
+        /* Toggle Switch CSS */
+        .switch { position: relative; display: inline-block; width: 50px; height: 26px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc; transition: .4s; border-radius: 34px;
+        }
+        .slider:before {
+            position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px;
+            background-color: white; transition: .4s; border-radius: 50%;
+        }
+        input:checked + .slider { background-color: var(--success); }
+        input:checked + .slider:before { transform: translateX(24px); }
+
+        /* Feature 6: Timer */
+        .timer-display { font-size: 3rem; font-weight: bold; text-align: center; margin: 15px 0; color: var(--success); }
+        .timer-display.urgent { color: var(--primary); animation: shake 0.5s; }
+        
+        .timer-controls { display: flex; gap: 10px; }
+        .timer-controls input { flex: 1; padding: 10px; border-radius: 8px; border: 1px solid #ddd; }
+        .btn-primary { background: var(--dark); color: white; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; }
+        
+        /* Feature 7: Safe Havens */
+        #havensList { max-height: 200px; overflow-y: auto; }
+        .haven-item {
+            padding: 10px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between;
+        }
+        .haven-item a { color: var(--primary); text-decoration: none; font-weight: bold; }
+
+        /* Extra Feature: Recorder */
+        .recording-indicator {
+            display: none; color: red; font-weight: bold; text-align: center; animation: blink 1s infinite;
+        }
+        @keyframes blink { 50% { opacity: 0; } }
+
+        /* Generic Utilities */
+        button:active { transform: scale(0.98); }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Guardian 🛡️</h1>
+
+    <div class="card sos-container">
+        <h2>ONE-TAP SOS</h2>
+        <p style="color: #777; font-size: 0.9rem;">Sends location + Starts Recording</p>
+        <button class="sos-btn" onclick="triggerSOS()">SOS</button>
+        <p id="recordingStatus" class="recording-indicator">🔴 REC Audio Evidence...</p>
+    </div>
+
+    <div class="card">
+        <div class="toggle-container">
+            <h2>Fake Call Deterrent</h2>
+            <button class="btn-primary" onclick="startFakeCall()">Trigger (5s)</button>
+        </div>
+        <p style="font-size: 0.9rem; color: #666;">Simulates an incoming call from "Mom" to look busy.</p>
+    </div>
+
+    <div class="card">
+        <h2>Shake to Alert</h2>
+        <p style="font-size: 0.9rem;">Shake device vigorously to trigger SOS.</p>
+        <button id="sensorBtn" class="btn-primary" onclick="requestSensorPermission()" style="width:100%">Enable Sensors (iOS)</button>
+    </div>
+
+    <div class="card">
+        <div class="toggle-container">
+            <h2>Live Map</h2>
+            <label class="switch">
+                <input type="checkbox" id="routeToggle">
+                <span class="slider"></span>
+            </label>
+        </div>
+        <p style="font-size: 0.8rem; margin-top: -10px;">Toggle: Red (Fast) vs Green (Safe)</p>
+        <div id="map"></div>
+        <p style="font-size: 0.8rem; color: #666; text-align: center; margin-top: 10px;">Tap map to report a hazard ⚠️</p>
+    </div>
+
+    <div class="card">
+        <h2>"Am I OK?" Timer</h2>
+        <div id="timerDisplay" class="timer-display">00:00</div>
+        <div class="timer-controls">
+            <input type="number" id="timerInput" placeholder="Mins" value="10">
+            <button class="btn-primary" onclick="startTimer()">Start</button>
+            <button class="btn-primary" style="background: var(--success);" onclick="stopTimer()">I'm Safe</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Offline Safe Havens</h2>
+        <input type="text" id="havenSearch" placeholder="Search police, hospitals..." style="width: 100%; padding: 10px; margin-bottom: 10px; box-sizing: border-box; border-radius: 8px; border: 1px solid #ccc;">
+        <div id="havensList"></div>
+    </div>
+</div>
+
+<div id="fakeCallModal">
+    <div class="caller-img"></div>
+    <h1 style="color: white; font-weight: normal;">Mom</h1>
+    <p>Mobile +91 98765 43210</p>
+    <div class="call-actions">
+        <button class="call-btn decline" onclick="endFakeCall()"><i class="fas fa-phone-slash"></i> ✖</button>
+        <button class="call-btn answer" onclick="endFakeCall()"><i class="fas fa-phone"></i> 📞</button>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+    // --- Global Variables ---
+    let map, routeA, routeB;
+    let timerInterval;
+    let hazards = JSON.parse(localStorage.getItem('hazards')) || [];
+    let mediaRecorder;
+    let audioChunks = [];
+
+    // --- Feature 1: One-Tap SOS & Extra Feature: Black Box Recorder ---
+    function triggerSOS() {
+        // 1. Start Audio Recording (Evidence)
+        startRecording();
+
+        // 2. Get Location and Send WhatsApp
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(position => {
+                const lat = position.coords.latitude;
+                const lng = position.coords.longitude;
+                const phone = "919999999999"; // Replace with trusted contact
+                const text = `EMERGENCY! I need help. \n\nMy Location: https://www.google.com/maps?q=${lat},${lng}`;
+                
+                // Open WhatsApp
+                window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank');
+                
+                alert("SOS SENT! Recording audio evidence in background...");
+            }, () => {
+                alert("GPS Error. Sending generic message.");
+                window.open(`https://wa.me/?text=EMERGENCY! I need help!`, '_blank');
+            });
+        }
+    }
+
+    // --- Extra Feature Logic: Audio Recorder ---
+    async function startRecording() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            document.getElementById('recordingStatus').style.display = 'block';
+            
+            mediaRecorder.ondataavailable = event => {
+                audioChunks.push(event.data);
+            };
+
+            mediaRecorder.onstop = () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                const audioUrl = URL.createObjectURL(audioBlob);
+                // In a real app, upload this Blob to server. Here we play it back or download.
+                const audio = new Audio(audioUrl);
+                audio.play();
+                alert("Evidence Saved locally.");
+                document.getElementById('recordingStatus').style.display = 'none';
+            };
+
+            mediaRecorder.start();
+            // Record for 10 seconds automatically
+            setTimeout(() => { mediaRecorder.stop(); }, 10000); 
+        } catch (err) {
+            console.error("Mic permission denied");
+        }
+    }
+
+    // --- Feature 2: Fake Call ---
+    const ringtone = new Audio('https://upload.wikimedia.org/wikipedia/commons/e/e0/Synthesized_Ring_Tone.ogg'); // Open license sound
+    
+    function startFakeCall() {
+        setTimeout(() => {
+            document.getElementById('fakeCallModal').style.display = 'block';
+            ringtone.loop = true;
+            ringtone.play();
+            navigator.vibrate([1000, 500, 1000]); // Vibrate phone
+        }, 5000);
+    }
+
+    function endFakeCall() {
+        document.getElementById('fakeCallModal').style.display = 'none';
+        ringtone.pause();
+        ringtone.currentTime = 0;
+        navigator.vibrate(0);
+    }
+
+    // --- Feature 3: Shake Detection ---
+    function requestSensorPermission() {
+        // iOS 13+ requires permission
+        if (typeof DeviceMotionEvent.requestPermission === 'function') {
+            DeviceMotionEvent.requestPermission()
+                .then(response => {
+                    if (response === 'granted') {
+                        startShakeDetection();
+                        document.getElementById('sensorBtn').style.display = 'none';
+                    }
+                })
+                .catch(console.error);
+        } else {
+            startShakeDetection(); // Non-iOS
+            document.getElementById('sensorBtn').style.display = 'none';
+        }
+    }
+
+    function startShakeDetection() {
+        let lastX = 0, lastY = 0, lastZ = 0;
+        window.addEventListener('devicemotion', (event) => {
+            const acc = event.accelerationIncludingGravity;
+            if(!acc) return;
+            
+            const deltaX = Math.abs(acc.x - lastX);
+            const deltaY = Math.abs(acc.y - lastY);
+            const deltaZ = Math.abs(acc.z - lastZ);
+
+            if (deltaX + deltaY + deltaZ > 25) { // Threshold
+                triggerSOS(); // Re-use SOS function
+            }
+            lastX = acc.x; lastY = acc.y; lastZ = acc.z;
+        });
+    }
+
+    // --- Feature 4 & 5: Map Setup ---
+    function initMap() {
+        // Centered on Jaipur
+        map = L.map('map').setView([26.9124, 75.7873], 13);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        // Define Routes
+        const coordsA = [[26.9124, 75.7873], [26.9150, 75.8000], [26.9200, 75.8100]]; // Risky
+        const coordsB = [[26.9124, 75.7873], [26.9000, 75.7800], [26.8900, 75.8000], [26.9200, 75.8100]]; // Safe
+
+        routeA = L.polyline(coordsA, {color: 'red', weight: 5}).addTo(map); // Default
+        routeB = L.polyline(coordsB, {color: 'green', weight: 5});
+
+        // Load Hazards
+        hazards.forEach(h => {
+            L.marker([h.lat, h.lng]).addTo(map).bindPopup(`⚠️ Hazard: ${h.type}`);
+        });
+
+        // Hazard Click Listener
+        map.on('click', function(e) {
+            const type = prompt("Report Hazard: (No Light / Harassment / Accident)", "No Light");
+            if (type) {
+                L.marker(e.latlng).addTo(map).bindPopup(`⚠️ ${type}`).openPopup();
+                hazards.push({lat: e.latlng.lat, lng: e.latlng.lng, type: type});
+                localStorage.setItem('hazards', JSON.stringify(hazards));
+            }
+        });
+    }
+
+    // Toggle Route Logic
+    document.getElementById('routeToggle').addEventListener('change', function(e) {
+        if(e.target.checked) {
+            map.removeLayer(routeA);
+            map.addLayer(routeB);
+        } else {
+            map.removeLayer(routeB);
+            map.addLayer(routeA);
+        }
+    });
+
+    // --- Feature 6: Timer ---
+    function startTimer() {
+        let mins = document.getElementById('timerInput').value;
+        let time = mins * 60;
+        const display = document.getElementById('timerDisplay');
+        
+        display.classList.remove('urgent');
+        
+        clearInterval(timerInterval);
+        timerInterval = setInterval(() => {
+            let m = Math.floor(time / 60);
+            let s = time % 60;
+            display.textContent = `${m < 10 ? '0'+m : m}:${s < 10 ? '0'+s : s}`;
+            
+            if (time < 10) display.classList.add('urgent'); // Turn red
+            
+            if (time <= 0) {
+                clearInterval(timerInterval);
+                alert("TIME UP! Sending Alerts...");
+                triggerSOS();
+            }
+            time--;
+        }, 1000);
+    }
+
+    function stopTimer() {
+        clearInterval(timerInterval);
+        document.getElementById('timerDisplay').textContent = "SAFE";
+        document.getElementById('timerDisplay').classList.remove('urgent');
+    }
+
+    // --- Feature 7: Safe Havens ---
+    const havens = [
+        {name: "Jaipur Police Station", phone: "100", dist: "1.2km"},
+        {name: "SMS Hospital", phone: "102", dist: "2.5km"},
+        {name: "Women Helpline", phone: "1091", dist: "Global"},
+        {name: "Metro Station Guard", phone: "0141-222", dist: "0.5km"},
+        {name: "City PCR Van", phone: "112", dist: "Roaming"}
+    ];
+
+    function renderHavens(query = "") {
+        const list = document.getElementById('havensList');
+        list.innerHTML = "";
+        const filtered = havens.filter(h => h.name.toLowerCase().includes(query.toLowerCase()));
+        
+        filtered.forEach(h => {
+            list.innerHTML += `
+                <div class="haven-item">
+                    <div>
+                        <strong>${h.name}</strong><br>
+                        <small style="color:#666">${h.dist}</small>
+                    </div>
+                    <a href="tel:${h.phone}">📞 Call</a>
+                </div>
+            `;
+        });
+    }
+
+    document.getElementById('havenSearch').addEventListener('input', (e) => renderHavens(e.target.value));
+
+    // Init
+    initMap();
+    renderHavens();
+    const socket = io('http://0.0.0.0:8000', {
+            transports: ['websocket', 'polling']
+        });
+
+        const statusDiv = document.getElementById('connection-status');
+        const forceDisplay = document.getElementById('force-display');
+
+        // On Connect
+        socket.on('connect', () => {
+            statusDiv.innerHTML = 'Server: <span style="color:green">Connected</span>';
+            statusDiv.classList.add('active');
+        });
+
+        // On Disconnect
+        socket.on('disconnect', () => {
+            statusDiv.innerHTML = 'Server: <span style="color:red">Disconnected</span>';
+            statusDiv.classList.remove('active');
+        });
+
+        // ==================================================
+        // 2. RECEIVE COMMANDS FROM SERVER (The "Return" Path)
+        // ==================================================
+        
+        // If Server detects a crash, it sends 'alert_sos'
+        socket.on('alert_sos', (data) => {
+            document.body.classList.add('danger');
+            alert("⚠️ " + data.msg);
+            // Trigger the WhatsApp SOS automatically
+            manualSOS(); 
+        });
+
+        // ==================================================
+        // 3. SEND SENSOR DATA (The "Forward" Path)
+        // ==================================================
+        
+        function startSensors() {
+            // Request Permission (Required for iOS 13+)
+            if (typeof DeviceMotionEvent.requestPermission === 'function') {
+                DeviceMotionEvent.requestPermission()
+                .then(response => {
+                    if (response == 'granted') {
+                        window.addEventListener('devicemotion', handleMotion);
+                    }
+                })
+                .catch(console.error);
+            } else {
+                // Android / Standard
+                window.addEventListener('devicemotion', handleMotion);
+            }
+            alert("Tracking Started! Shake phone to test.");
+        }
+
+        function handleMotion(event) {
+            // Get data from phone sensors
+            const x = event.accelerationIncludingGravity.x || 0;
+            const y = event.accelerationIncludingGravity.y || 0;
+            const z = event.accelerationIncludingGravity.z || 0;
+
+            // Calculate force for display
+            const total = Math.sqrt(x*x + y*y + z*z);
+            forceDisplay.innerText = `Force: ${total.toFixed(2)}`;
+
+            // Send to Python Server
+            socket.emit('sensor_data', { x: x, y: y, z: z, total: total });
+        }
+
+        // ==================================================
+        // 4. MANUAL SOS (WhatsApp)
+        // ==================================================
+        function manualSOS() {
+            // Use your own phone number here for testing
+            const phone = "919876543210"; 
+            const msg = "HELP! I am in danger. Tracking ID: #SafeRouteDemo";
+            window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`);
+        }
+
+</script>
+</body>
+</html>

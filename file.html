@@ -120,7 +120,7 @@
 <div id="fakeCallModal">
     <div class="caller-img"></div>
     <h1 style="color: white; font-weight: normal;">Mom</h1>
-    <p>Mobile +91 98765 43210</p>
+    <p>Mobile +91 8081494902</p>
     <div class="call-actions">
         <button class="call-btn decline" onclick="endFakeCall()"><i class="fas fa-phone-slash"></i> ✖</button>
         <button class="call-btn answer" onclick="endFakeCall()"><i class="fas fa-phone"></i> 📞</button>
@@ -135,7 +135,7 @@
     // ===========================================
     // TODO: Paste your NGROK URL here (e.g., 'https://abc-123.ngrok-free.app')
     const SERVER_URL = 'http://192.168.38.1:5000'; 
-    const TRUSTED_PHONE = "919876543210"; 
+    const TRUSTED_PHONE = "+918081494902"; 
 
     // ===========================================
     // 2. SOCKET & TRACKING LOGIC
@@ -276,13 +276,7 @@
     }
 
     // --- FEATURE 7: SAFE HAVENS (Offline Data) ---
-    const havens = [
-        {name: "Malviya Nagar Police Station", phone: "100", dist: "1.2km", type: "Police"},
-        {name: "Fortis Escorts Hospital", phone: "0141-2547000", dist: "2.5km", type: "Hospital"},
-        {name: "JLN Marg Patrol Van", phone: "112", dist: "Roaming", type: "Police"},
-        {name: "Gaurav Tower Security", phone: "N/A", dist: "0.5km", type: "Safe Zone"},
-        {name: "Jaipuria Hospital", phone: "108", dist: "3.0km", type: "Hospital"}
-    ];
+    // Removed - using fullHavenDatabase instead
 
     function renderHavens(query = "") {
         const list = document.getElementById('havensList');
@@ -338,27 +332,6 @@
     } else {
         document.getElementById('voiceStatus').innerText = "Voice control not supported in this browser.";
     }
-    // --- 1. JAIPUR ROUTE DATA (MNIT -> WTP) ---
-// Detailed coordinates for a realistic curved path
-const routeData = {
-    // Green Path (Safe: Main JLN Marg Road - Well Lit, Patrolled)
-    safe: [
-        [26.8640, 75.8162], // MNIT Main Gate
-        [26.8635, 75.8150],
-        [26.8600, 75.8160], // JLN Marg
-        [26.8580, 75.8150],
-        [26.8552, 75.8067], // Near Gaurav Tower
-        [26.8534, 75.8051]  // WTP Entrance
-    ],
-    // Red Path (Risky: Back Alleys/Shortcuts - Dark)
-    risky: [
-        [26.8640, 75.8162], // MNIT Gate
-        [26.8610, 75.8100], // Empty Service Lane
-        [26.8590, 75.8080], // Construction Zone
-        [26.8550, 75.8060], // Unlit Park
-        [26.8534, 75.8051]  // WTP Entrance
-    ]
-};
 
 // --- 2. SAFE HAVENS (Real Places in Jaipur) ---
 // Places the user can run to for help
@@ -429,14 +402,6 @@ const fullHavenDatabase = [
     { name: "Apollo Pharmacy JLN Marg", type: "Medical", lat: 26.8580, lng: 75.8120, phone: "1860-500-0101" }
 ];
 
-// 2. KNOWN HAZARD ZONES (For Red Circles on Map)
-// Areas to warn users about
-const hazardZones = [
-    { lat: 26.8610, lng: 75.8100, reason: "No Street Lights" },
-    { lat: 26.8590, lng: 75.8080, reason: "Construction Debris" },
-    { lat: 26.8650, lng: 75.8200, reason: "Stray Dog Pack" },
-    { lat: 26.8500, lng: 75.8000, reason: "Water Logging" }
-];
 
 // 3. EMERGENCY HELPLINE NUMBERS (Global List)
 const emergencyContacts = [
@@ -510,6 +475,84 @@ const emergencyContacts = [
             window.speechSynthesis.speak(speech);
         });
     }
+   function initMap() {
+        // Centered on Jaipur
+        map = L.map('map').setView([26.9124, 75.7873], 13);
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        // Define Routes
+        const coordsA = [[26.9124, 75.7873], [26.9150, 75.8000], [26.9200, 75.8100]]; // Risky
+        const coordsB = [[26.9124, 75.7873], [26.9000, 75.7800], [26.8900, 75.8000], [26.9200, 75.8100]]; // Safe
+
+        routeA = L.polyline(coordsA, {color: 'red', weight: 5}).addTo(map); // Default
+        routeB = L.polyline(coordsB, {color: 'green', weight: 5});
+
+        // Load Hazards
+        hazards.forEach(h => {
+            L.marker([h.lat, h.lng]).addTo(map).bindPopup(`⚠️ Hazard: ${h.type}`);
+        });
+
+        // Hazard Click Listener
+        map.on('click', function(e) {
+            const type = prompt("Report Hazard: (No Light / Harassment / Accident)", "No Light");
+            if (type) {
+                L.marker(e.latlng).addTo(map).bindPopup(`⚠️ ${type}`).openPopup();
+                hazards.push({lat: e.latlng.lat, lng: e.latlng.lng, type: type});
+                localStorage.setItem('hazards', JSON.stringify(hazards));
+            }
+        });
+    }
+
+    // Toggle Route Logic
+    document.getElementById('routeToggle').addEventListener('change', function(e) {
+        if(e.target.checked) {
+            map.removeLayer(routeA);
+            map.addLayer(routeB);
+        } else {
+            map.removeLayer(routeB);
+            map.addLayer(routeA);
+        }
+    });
+
+    // --- Feature 6: Timer ---
+    function startTimer() {
+        let mins = document.getElementById('timerInput').value;
+        let time = mins * 60;
+        const display = document.getElementById('timerDisplay');
+        
+        display.classList.remove('urgent');
+        
+        clearInterval(timerInterval);
+        timerInterval = setInterval(() => {
+            let m = Math.floor(time / 60);
+            let s = time % 60;
+            display.textContent = `${m < 10 ? '0'+m : m}:${s < 10 ? '0'+s : s}`;
+            
+            if (time < 10) display.classList.add('urgent'); // Turn red
+            
+            if (time <= 0) {
+                clearInterval(timerInterval);
+                alert("TIME UP! Sending Alerts...");
+                triggerSOS();
+            }
+            time--;
+        }, 1000);
+    }
+
+    function stopTimer() {
+        clearInterval(timerInterval);
+        document.getElementById('timerDisplay').textContent = "SAFE";
+        document.getElementById('timerDisplay').classList.remove('urgent');
+    }
+    
+    // Safe Havens renderHavens function already defined above - duplicate removed
+
+    // Init
+    initMap();
+    renderHavens();
 </script>
 </body>
 </html>
